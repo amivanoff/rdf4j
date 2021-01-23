@@ -206,7 +206,7 @@ public class IsomorphicTest {
 
 	private boolean isomorphic(Model m1, Model m2) {
 
-		boolean isomorphic = Models.isomorphic(m1, m2);
+		boolean isomorphic = GraphComparisons.isomorphic(m1, m2);
 		if (!isomorphic) {
 			throw new IllegalStateException("Not isomorphic");
 		}
@@ -216,7 +216,7 @@ public class IsomorphicTest {
 
 	private boolean notIsomorphic(Model m1, Model m2) {
 
-		boolean isomorphic = Models.isomorphic(m1, m2);
+		boolean isomorphic = GraphComparisons.isomorphic(m1, m2);
 		if (isomorphic) {
 			throw new IllegalStateException("Should not be isomorphic");
 		}
