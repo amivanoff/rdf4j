@@ -19,6 +19,7 @@ import org.eclipse.rdf4j.model.impl.TreeModel;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.Rio;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 public class IsomorphicTest {
@@ -160,9 +161,7 @@ public class IsomorphicTest {
 
 	@Test
 	public void internallyIsomorphic() {
-
 		isomorphic(internallyIsomorphic, internallyIsomorphic_2);
-
 	}
 
 	@Test

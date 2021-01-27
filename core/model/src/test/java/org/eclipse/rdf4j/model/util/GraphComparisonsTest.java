@@ -1,23 +1,27 @@
 package org.eclipse.rdf4j.model.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.eclipse.rdf4j.model.util.GraphComparisons.hashBag;
 import static org.eclipse.rdf4j.model.util.Values.bnode;
 import static org.eclipse.rdf4j.model.util.Values.iri;
 
-import java.math.BigInteger;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Model;
-import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.eclipse.rdf4j.model.impl.TreeModel;
-import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.junit.Test;
 
+import com.google.common.base.Charsets;
+import com.google.common.collect.Multimap;
 import com.google.common.hash.HashCode;
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hashing;
 
 public class GraphComparisonsTest {
 
@@ -52,10 +56,10 @@ public class GraphComparisonsTest {
 	public void testPartition() {
 		Model example49 = buildExample49Model();
 
-		Collection<Collection<BNode>> partition = GraphComparisons
-				.partition(GraphComparisons.hashBNodes(example49));
+		Multimap<HashCode, BNode> partition = GraphComparisons
+				.partitionMapping(GraphComparisons.hashBNodes(example49));
 
-		assertThat(partition).hasSize(3);
+		assertThat(partition.asMap().values()).hasSize(3);
 	}
 
 	@Test
@@ -65,8 +69,23 @@ public class GraphComparisonsTest {
 		Model canonicalized = GraphComparisons.isoCanonicalize(example49);
 
 		assertThat(canonicalized.size()).isEqualTo(example49.size());
+	}
 
-		canonicalized.forEach(System.out::println);
+	@Test
+	public void testIsoCanonicalize_list() {
+		List<String> list = Arrays.asList("b", "a", "c", "d", "e");
+
+		Model rdfCollection1 = RDFCollections.asRDF(list, a, new TreeModel());
+
+		rdfCollection1.add(p, q, a);
+
+		Model rdfCollection2 = RDFCollections.asRDF(list, b, new LinkedHashModel());
+		rdfCollection2.add(p, q, b);
+
+		Model canonicalized1 = GraphComparisons.isoCanonicalize(rdfCollection1);
+		Model canonicalized2 = GraphComparisons.isoCanonicalize(rdfCollection2);
+
+		assertThat(canonicalized1).isEqualTo(canonicalized2);
 	}
 
 	@Test
@@ -78,8 +97,37 @@ public class GraphComparisonsTest {
 	}
 
 	@Test
-	public void testShaclReportsIsomorphic() {
+	public void testHashTuple() {
+		HashFunction hashFunction = Hashing.murmur3_128();
 
+		HashCode hash1 = hashFunction.hashString("abcd", Charsets.UTF_8);
+		HashCode hash2 = hashFunction.hashString("efgh", Charsets.UTF_8);
+
+		HashCode sequence12 = GraphComparisons.hashTuple(hash1, hash2);
+		HashCode sequence21 = GraphComparisons.hashTuple(hash2, hash1);
+
+		// hashTuple is order-dependent
+		assertThat(sequence12).isNotEqualTo(sequence21);
+	}
+
+	@Test
+	public void testHashBag() {
+		HashFunction hashFunction = Hashing.murmur3_128();
+
+		HashCode hash1 = hashFunction.hashString("abcd", Charsets.UTF_8);
+		HashCode hash2 = hashFunction.hashString("efgh", Charsets.UTF_8);
+		HashCode hash3 = hashFunction.hashString("ijkl", Charsets.UTF_8);
+
+		HashCode sequence12 = hashBag(hash1, hash2);
+		HashCode sequence21 = hashBag(hash2, hash1);
+
+		// hashBag is commutative
+		assertThat(sequence12).isEqualTo(sequence21);
+
+		// hashBag is associative
+		assertThat(hashBag(hash1, hashBag(hash2, hash3)))
+				.isEqualTo(hashBag(hashBag(hash1, hash2), hash3))
+				.isEqualTo(hashBag(hash1, hash2, hash3));
 	}
 
 	private Model buildExample49Model() {

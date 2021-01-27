@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
@@ -28,9 +29,9 @@ import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
-import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.LinkedHashModel;
-import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Charsets;
 import com.google.common.collect.HashMultimap;
@@ -46,6 +47,8 @@ import com.google.common.hash.Hashing;
  */
 public class GraphComparisons {
 
+	private static final Logger logger = LoggerFactory.getLogger(GraphComparisons.class);
+
 	private static final HashFunction hashFunction = Hashing.murmur3_128();
 
 	private static final HashCode initialHashCode = hashFunction.hashString("", Charsets.UTF_8);
@@ -54,27 +57,49 @@ public class GraphComparisons {
 	private static final HashCode distinguisher = hashFunction.hashString("@", Charsets.UTF_8);
 
 	public static boolean isomorphic(Model m1, Model m2) {
-		Model c1 = isoCanonicalize(m1);
-		Model c2 = isoCanonicalize(m2);
+		if (m1.size() != m2.size()) {
+			return false;
+		}
+
+		final Model c1 = isoCanonicalize(m1);
+		final Model c2 = isoCanonicalize(m2);
 		return (c1.equals(c2));
 	}
 
 	public static Model isoCanonicalize(Model m) {
 		Map<BNode, HashCode> blankNodeMapping = hashBNodes(m);
-		List<Collection<BNode>> partition = partition(blankNodeMapping);
+		Multimap<HashCode, BNode> partition = partitionMapping(blankNodeMapping);
 
 		if (isFine(partition)) {
 			return labelModel(m, blankNodeMapping);
 		}
 
-		return distinguish(m, blankNodeMapping, partition, null);
+		return distinguish(m, blankNodeMapping, partition, null, new ArrayList<>(), new ArrayList<>());
+	}
+
+	static Set<BNode> getBlankNodes(Model m) {
+		final Set<BNode> blankNodes = new HashSet<>();
+
+		m.subjects().forEach(s -> {
+			if (s instanceof BNode) {
+				blankNodes.add((BNode) s);
+			}
+		});
+		m.objects().forEach(o -> {
+			if (o instanceof BNode) {
+				blankNodes.add((BNode) o);
+			}
+		});
+
+		return blankNodes;
 	}
 
 	private static Model distinguish(Model m, Map<BNode, HashCode> blankNodeMapping,
-			List<Collection<BNode>> partition,
-			Model lowestFound) {
+			Multimap<HashCode, BNode> partitionMapping,
+			Model lowestFound, List<BNode> parentFixpoints, List<Map<BNode, HashCode>> finePartitionMappings) {
 
-		Collections.sort(partition, new Comparator<Collection<BNode>>() {
+		final List<Collection<BNode>> sortedPartitions = new ArrayList<>(partitionMapping.asMap().values());
+		Collections.sort(sortedPartitions, new Comparator<Collection<BNode>>() {
 			public int compare(Collection<BNode> a, Collection<BNode> b) {
 				int result = a.size() - b.size();
 				if (result == 0) {
@@ -89,46 +114,96 @@ public class GraphComparisons {
 			}
 		});
 
-		Collection<BNode> lowestNonTrivial = partition.stream()
+		Collection<BNode> lowestNonTrivialPartition = sortedPartitions.stream()
 				.filter(part -> part.size() > 1)
 				.findFirst()
 				.orElseThrow();
 
-		for (BNode node : lowestNonTrivial) {
+		for (BNode node : lowestNonTrivialPartition) {
+			List<BNode> fixpoints = new ArrayList<>(parentFixpoints);
+			fixpoints.add(node);
 			HashMap<BNode, HashCode> clonedHash = new HashMap<>(blankNodeMapping);
 			clonedHash.put(node, hashTuple(clonedHash.get(node), distinguisher));
 			Map<BNode, HashCode> hashDoublePrime = hashBNodes(m, clonedHash);
-			List<Collection<BNode>> partitionPrime = partition(hashDoublePrime);
+
+			Multimap<HashCode, BNode> partitionPrime = partitionMapping(hashDoublePrime);
 			if (isFine(partitionPrime)) {
-				Model gc = labelModel(m, hashDoublePrime);
+				finePartitionMappings.add(hashDoublePrime);
 				if (lowestFound == null || mappingSize(hashDoublePrime).compareTo(mappingSize(blankNodeMapping)) < 0) {
-					lowestFound = gc;
+					lowestFound = labelModel(m, hashDoublePrime);
 				}
 			} else {
-				lowestFound = distinguish(m, hashDoublePrime, partitionPrime, lowestFound);
+				Map<BNode, BNode> compatibleAutomorphism = findCompatibleAutomorphism(fixpoints, finePartitionMappings);
+				if (compatibleAutomorphism != null) {
+					// prune
+					continue;
+				}
+				lowestFound = distinguish(m, hashDoublePrime, partitionPrime, lowestFound, fixpoints,
+						finePartitionMappings);
 			}
 		}
 
 		return lowestFound;
 	}
 
-	protected static List<Collection<BNode>> partition(Map<BNode, HashCode> blankNodeMapping) {
+	static Map<BNode, BNode> findCompatibleAutomorphism(List<BNode> fixpoints,
+			List<Map<BNode, HashCode>> partitionMappings) {
+		// check if two mappings with identical hash codes exist
+		for (Map<BNode, HashCode> mapping : partitionMappings) {
+			Map<BNode, HashCode> compatibleMapping = null;
+			for (Map<BNode, HashCode> om : partitionMappings) {
+				if (om.equals(mapping)) {
+					continue;
+				}
+
+				List<HashCode> difference = new ArrayList<>(om.values());
+				difference.removeAll(mapping.values());
+				if (difference.isEmpty()) {
+					compatibleMapping = om;
+					break;
+				}
+			}
+
+			if (compatibleMapping != null) {
+				Map<HashCode, BNode> invertedMapping = mapping.entrySet()
+						.stream()
+						.collect(Collectors.toMap(Entry::getValue, Entry::getKey));
+
+				Map<BNode, BNode> automorphism = new HashMap<>();
+				for (Entry<BNode, HashCode> entry : compatibleMapping.entrySet()) {
+					automorphism.put(entry.getKey(), invertedMapping.get(entry.getValue()));
+				}
+				// check if fixpoints all map, if so we have a compatible automorphism
+				for (BNode fixpoint : fixpoints) {
+					if (!automorphism.get(fixpoint).equals(fixpoint)) {
+						break;
+					}
+					return automorphism;
+				}
+			}
+		}
+		return null;
+	}
+
+	protected static List<Collection<BNode>> partitions(Multimap<HashCode, BNode> partitionMapping) {
 		List<Collection<BNode>> partition = new ArrayList<>();
 
-		Multimap<HashCode, BNode> invertedMapping = Multimaps.invertFrom(Multimaps.forMap(blankNodeMapping),
-				HashMultimap.create());
-
-		for (Entry<HashCode, Collection<BNode>> entry : invertedMapping.asMap().entrySet()) {
+		for (Entry<HashCode, Collection<BNode>> entry : partitionMapping.asMap().entrySet()) {
 			partition.add(entry.getValue());
 		}
 		return partition;
 	}
 
+	protected static Multimap<HashCode, BNode> partitionMapping(Map<BNode, HashCode> blankNodeMapping) {
+		return Multimaps.invertFrom(Multimaps.forMap(blankNodeMapping), HashMultimap.create());
+	}
+
 	private static BigInteger mappingSize(Map<BNode, HashCode> mapping) {
-		return mapping.values()
+		BigInteger size = mapping.values()
 				.stream()
 				.map(hashCode -> new BigInteger(1, hashCode.asBytes()))
 				.reduce(BigInteger.ZERO, (v1, v2) -> v1.add(v2));
+		return size;
 	}
 
 	private static Model labelModel(Model original, Map<BNode, HashCode> hash) {
@@ -157,27 +232,14 @@ public class GraphComparisons {
 	}
 
 	private static Map<BNode, HashCode> hashBNodes(Model m, Map<BNode, HashCode> initialBlankNodeMapping) {
-		Map<BNode, HashCode> initialHash = initialBlankNodeMapping == null ? new HashMap<>()
+		final Map<BNode, HashCode> initialHash = initialBlankNodeMapping == null ? new HashMap<>()
 				: new HashMap<>(initialBlankNodeMapping);
+		final Map<Value, HashCode> staticValueMapping = new HashMap<>();
 
-		final Set<BNode> blankNodes = new HashSet<>();
-
-		m.subjects().forEach(s -> {
-			if (s instanceof BNode) {
-				if (!initialHash.containsKey(s)) {
-					initialHash.put((BNode) s, initialHashCode);
-				}
-				blankNodes.add((BNode) s);
-			}
-		});
-		m.objects().forEach(o -> {
-			if (o instanceof BNode) {
-				if (!initialHash.containsKey(o)) {
-					initialHash.put((BNode) o, initialHashCode);
-				}
-				blankNodes.add((BNode) o);
-			}
-		});
+		final Set<BNode> blankNodes = getBlankNodes(m);
+		if (initialHash.isEmpty()) {
+			blankNodes.forEach(node -> initialHash.put(node, initialHashCode));
+		}
 
 		Map<BNode, HashCode> currentHash = null;
 		if (blankNodes.isEmpty()) {
@@ -191,13 +253,13 @@ public class GraphComparisons {
 
 				for (BNode b : blankNodes) {
 					for (Statement st : m.getStatements(b, null, null)) {
-						HashCode c = hashTuple(hashForValue(st.getObject(), previousHash),
-								hashForValue(st.getPredicate(), previousHash), outgoing);
+						HashCode c = hashTuple(hashForValue(st.getObject(), previousHash, staticValueMapping),
+								hashForValue(st.getPredicate(), previousHash, staticValueMapping), outgoing);
 						currentHash.put(b, hashBag(c, currentHash.get(b)));
 					}
 					for (Statement st : m.getStatements(null, null, b)) {
-						HashCode c = hashTuple(hashForValue(st.getSubject(), previousHash),
-								hashForValue(st.getPredicate(), previousHash),
+						HashCode c = hashTuple(hashForValue(st.getSubject(), previousHash, staticValueMapping),
+								hashForValue(st.getPredicate(), previousHash, staticValueMapping),
 								incoming);
 						currentHash.put(b, hashBag(c, currentHash.get(b)));
 					}
@@ -207,28 +269,29 @@ public class GraphComparisons {
 		return currentHash;
 	}
 
-	private static HashCode hashTuple(HashCode... hashCodes) {
+	protected static HashCode hashTuple(HashCode... hashCodes) {
 		return Hashing.combineOrdered(Arrays.asList(hashCodes));
 	}
 
-	private static HashCode hashBag(HashCode... hashCodes) {
+	protected static HashCode hashBag(HashCode... hashCodes) {
 		return Hashing.combineUnordered(Arrays.asList(hashCodes));
 	}
 
-	private static HashCode hashForValue(Value v, Map<BNode, HashCode> mapping) {
-		if (v instanceof BNode) {
-			return mapping.get(v);
+	private static HashCode hashForValue(Value value, Map<BNode, HashCode> bnodeMapping,
+			Map<Value, HashCode> staticValueMapping) {
+		if (value instanceof BNode) {
+			return bnodeMapping.get(value);
 		}
-		// TODO optimize by caching hashes
-		return hashFunction.hashString(v.stringValue(), Charsets.UTF_8);
+		return staticValueMapping.computeIfAbsent(value,
+				v -> hashFunction.hashString(v.stringValue(), Charsets.UTF_8));
 	}
 
 	private static BNode createCanonicalBNode(BNode node, Map<BNode, HashCode> mapping) {
 		return bnode("iso-" + mapping.get(node).toString());
 	}
 
-	private static boolean isFine(List<Collection<BNode>> partition) {
-		return partition.stream().allMatch(member -> member.size() == 1);
+	private static boolean isFine(Multimap<HashCode, BNode> partitionMapping) {
+		return partitionMapping.asMap().values().stream().allMatch(member -> member.size() == 1);
 	}
 
 	private static boolean conditionsMet(Map<BNode, HashCode> currentHash, Map<BNode, HashCode> previousHash) {
@@ -236,40 +299,27 @@ public class GraphComparisons {
 			return false;
 		}
 
-		if (!currentHashChanged(currentHash, previousHash)) {
+		if (isFine(partitionMapping(currentHash))) { // no two terms share a hash
 			return true;
 		}
-		return !containsSharedHashes(currentHash);
+
+		return currentHashUnchanged(currentHash, previousHash);
 	}
 
-	private static boolean currentHashChanged(Map<BNode, HashCode> currentHash, Map<BNode, HashCode> previousHash) {
+	private static boolean currentHashUnchanged(Map<BNode, HashCode> currentHash, Map<BNode, HashCode> previousHash) {
 		for (BNode x : currentHash.keySet()) {
 			for (BNode y : currentHash.keySet()) {
 				if (currentHash.get(x).equals(currentHash.get(y))) {
 					if (!previousHash.get(x).equals(previousHash.get(y))) {
-						return true;
+						return false;
 					}
 				} else if (previousHash.get(x).equals(previousHash.get(y))) {
-					return true;
+					return false;
 				}
 			}
 		}
 
-		return false;
+		return true;
 	}
 
-	private static boolean containsSharedHashes(Map<BNode, HashCode> currentHash) {
-		for (BNode x : currentHash.keySet()) {
-			for (BNode y : currentHash.keySet()) {
-				if (x.equals(y)) {
-					if (!currentHash.get(x).equals(currentHash.get(y))) {
-						return true;
-					}
-				} else if (currentHash.get(x).equals(currentHash.get(y))) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
 }
