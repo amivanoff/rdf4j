@@ -264,7 +264,7 @@ public class GraphComparisons {
 						currentHash.put(b, hashBag(c, currentHash.get(b)));
 					}
 				}
-			} while (!conditionsMet(currentHash, previousHash));
+			} while (!fullyDistinguished(currentHash, previousHash));
 		}
 		return currentHash;
 	}
@@ -294,31 +294,33 @@ public class GraphComparisons {
 		return partitionMapping.asMap().values().stream().allMatch(member -> member.size() == 1);
 	}
 
-	private static boolean conditionsMet(Map<BNode, HashCode> currentHash, Map<BNode, HashCode> previousHash) {
+	private static boolean fullyDistinguished(Map<BNode, HashCode> currentHash, Map<BNode, HashCode> previousHash) {
 		if (currentHash == null || previousHash == null) {
 			return false;
 		}
 
-		if (isFine(partitionMapping(currentHash))) { // no two terms share a hash
+		final Multimap<HashCode, BNode> currentPartitionMapping = partitionMapping(currentHash);
+		if (isFine(currentPartitionMapping)) { // no two terms share a hash
 			return true;
 		}
 
-		return currentHashUnchanged(currentHash, previousHash);
+		return currentUnchanged(currentPartitionMapping, previousHash);
 	}
 
-	private static boolean currentHashUnchanged(Map<BNode, HashCode> currentHash, Map<BNode, HashCode> previousHash) {
-		for (BNode x : currentHash.keySet()) {
-			for (BNode y : currentHash.keySet()) {
-				if (currentHash.get(x).equals(currentHash.get(y))) {
-					if (!previousHash.get(x).equals(previousHash.get(y))) {
-						return false;
-					}
-				} else if (previousHash.get(x).equals(previousHash.get(y))) {
-					return false;
-				}
+	private static boolean currentUnchanged(Multimap<HashCode, BNode> current, Map<BNode, HashCode> previousHash) {
+		// current is unchanged if: all bnodes that have the same hashcode in current also shared the same hashcode in
+		// previous, and all bnodes that have different ones in current also have different ones in previous.
+
+		final Multimap<HashCode, BNode> previous = partitionMapping(previousHash);
+		for (Collection<BNode> currentSharedHashNodes : current.asMap().values()) {
+			// pick a BNode, doesn't matter which: they all share the same hashcode
+			BNode node = currentSharedHashNodes.iterator().next();
+
+			HashCode previousHashCode = previousHash.get(node);
+			if (!previous.get(previousHashCode).equals(currentSharedHashNodes)) {
+				return false;
 			}
 		}
-
 		return true;
 	}
 
