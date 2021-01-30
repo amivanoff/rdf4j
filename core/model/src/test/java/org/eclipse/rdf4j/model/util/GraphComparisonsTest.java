@@ -89,6 +89,14 @@ public class GraphComparisonsTest {
 	}
 
 	@Test
+	public void testIsomorphic_NoBlankNodes() {
+		Model example49 = buildExample49Model();
+		Model isomorphic = buildExample49ModelIsomorphic();
+
+		assertThat(GraphComparisons.isomorphic(example49, isomorphic));
+	}
+
+	@Test
 	public void testIsomorphic() {
 		Model example49 = buildExample49Model();
 		Model isomorphic = buildExample49ModelIsomorphic();
@@ -130,6 +138,10 @@ public class GraphComparisonsTest {
 				.isEqualTo(hashBag(hash1, hash2, hash3));
 	}
 
+	/**
+	 * Graph from example 4.9 in http://aidanhogan.com/docs/rdf-canonicalisation.pdf
+	 * 
+	 */
 	private Model buildExample49Model() {
 		// @formatter:off
 		Model example49 = new ModelBuilder(new LinkedHashModel())
@@ -147,6 +159,10 @@ public class GraphComparisonsTest {
 		return example49;
 	}
 
+	/**
+	 * Graph from example 4.9 in http://aidanhogan.com/docs/rdf-canonicalisation.pdf - differently ordered
+	 * 
+	 */
 	private Model buildExample49ModelIsomorphic() {
 		// @formatter:off
 		Model example49 = new ModelBuilder(new LinkedHashModel())

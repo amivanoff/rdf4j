@@ -30,6 +30,10 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 @State(Scope.Benchmark)
 @Warmup(iterations = 20)
@@ -70,6 +74,13 @@ public class IsomorphicBenchmark {
 	private Model manyProperties_2 = getModel("manyProperties.ttl");
 	private Model manyProperties2_2 = getModel("manyProperties2.ttl");
 	private Model uuid_2 = getModel("uuid.ttl");
+
+	public static void main(String[] args) throws RunnerException {
+		Options opt = new OptionsBuilder().include("IsomorphicBenchmark.*")
+				.build();
+
+		new Runner(opt).run();
+	}
 
 	@Setup(Level.Iteration)
 	public void after() {
@@ -239,7 +250,7 @@ public class IsomorphicBenchmark {
 	private Model getModel(String name) {
 		try {
 			try (InputStream resourceAsStream = IsomorphicBenchmark.class.getClassLoader()
-					.getResourceAsStream("benchmark/" + name)) {
+					.getResourceAsStream("benchmarkFiles/" + name)) {
 				return Rio.parse(resourceAsStream, "http://example.com/", RDFFormat.TURTLE);
 			}
 		} catch (IOException e) {

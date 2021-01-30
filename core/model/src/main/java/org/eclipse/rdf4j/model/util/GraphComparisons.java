@@ -42,10 +42,15 @@ import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
 
 /**
- * @author jeen
- *
+ * Functions for canonicalizing RDF models and computing isomorphism.
+ * 
+ * @implNote The algorithms used in this class are based on the iso-canonical algorithm as described in: Hogan, A.
+ *           (2017). Canonical forms for isomorphic and equivalent RDF graphs: algorithms for leaning and labelling
+ *           blank nodes. ACM Transactions on the Web (TWEB), 11(4), 1-62.
+ * 
+ * @author Jeen Broekstra
  */
-public class GraphComparisons {
+class GraphComparisons {
 
 	private static final Logger logger = LoggerFactory.getLogger(GraphComparisons.class);
 
@@ -56,17 +61,70 @@ public class GraphComparisons {
 	private static final HashCode incoming = hashFunction.hashString("-", Charsets.UTF_8);
 	private static final HashCode distinguisher = hashFunction.hashString("@", Charsets.UTF_8);
 
-	public static boolean isomorphic(Model m1, Model m2) {
-		if (m1.size() != m2.size()) {
+	/**
+	 * Compares two RDF models, and returns <tt>true</tt> if they consist of isomorphic graphs and the isomorphic graph
+	 * identifiers map 1:1 to each other. RDF graphs are isomorphic graphs if statements from one graphs can be mapped
+	 * 1:1 on to statements in the other graphs. In this mapping, blank nodes are not considered mapped when having an
+	 * identical internal id, but are mapped from one graph to the other by looking at the statements in which the blank
+	 * nodes occur. A Model can consist of more than one graph (denoted by context identifiers). Two models are
+	 * considered isomorphic if for each of the graphs in one model, an isomorphic graph exists in the other model, and
+	 * the context identifiers of these graphs are identical.
+	 * 
+	 * @implNote The algorithm used by this comparison is a depth-first search for an iso-canonical blank node mapping
+	 *           for each model, and using that as a basis for comparison. The algorithm is described in detail in:
+	 *           Hogan, A. (2017). Canonical forms for isomorphic and equivalent RDF graphs: algorithms for leaning and
+	 *           labelling blank nodes. ACM Transactions on the Web (TWEB), 11(4), 1-62.
+	 *
+	 * @see <a href="http://www.w3.org/TR/rdf11-concepts/#graph-isomorphism">RDF Concepts &amp; Abstract Syntax, section
+	 *      3.6 (Graph Comparison)</a>
+	 * @see http://aidanhogan.com/docs/rdf-canonicalisation.pdf
+	 * 
+	 */
+	public static boolean isomorphic(Model model1, Model model2) {
+		if (model1 == model2) {
+			return true;
+		}
+
+		if (model1.size() != model2.size()) {
 			return false;
 		}
 
-		final Model c1 = isoCanonicalize(m1);
-		final Model c2 = isoCanonicalize(m2);
-		return (c1.equals(c2));
+		if (model1.contexts().size() != model2.contexts().size()) {
+			return false;
+		}
+
+		if (model1.contexts().size() > 1) {
+			// model contains more than one context (including the null context). We compare per individual context.
+			for (Resource context : model1.contexts()) {
+				if (context instanceof BNode) {
+					// We currently do not handle mapping of blank nodes used as context identifiers.
+					logger.warn(
+							"isomorphism detection can not map blank nodes used as context identifiers. Comparison may give inaccurate results",
+							context
+					);
+				}
+
+				Model contextInlModel1 = model1.filter(null, null, null, context);
+				Model contextInModel2 = model2.filter(null, null, null, context);
+				if (contextInlModel1.size() != contextInModel2.size()) {
+					return false;
+				}
+				final Model canonicalizedContext1 = isoCanonicalize(contextInlModel1);
+				final Model canonicalizedContext2 = isoCanonicalize(contextInModel2);
+				if (!canonicalizedContext1.equals(canonicalizedContext2)) {
+					return false;
+				}
+			}
+			return true;
+		} else {
+			// only one context (the null context), so we're dealing with one graph only.
+			final Model c1 = isoCanonicalize(model1);
+			final Model c2 = isoCanonicalize(model2);
+			return c1.equals(c2);
+		}
 	}
 
-	public static Model isoCanonicalize(Model m) {
+	protected static Model isoCanonicalize(Model m) {
 		Map<BNode, HashCode> blankNodeMapping = hashBNodes(m);
 		Multimap<HashCode, BNode> partition = partitionMapping(blankNodeMapping);
 
@@ -77,7 +135,7 @@ public class GraphComparisons {
 		return distinguish(m, blankNodeMapping, partition, null, new ArrayList<>(), new ArrayList<>());
 	}
 
-	static Set<BNode> getBlankNodes(Model m) {
+	protected static Set<BNode> getBlankNodes(Model m) {
 		final Set<BNode> blankNodes = new HashSet<>();
 
 		m.subjects().forEach(s -> {
@@ -117,7 +175,7 @@ public class GraphComparisons {
 		Collection<BNode> lowestNonTrivialPartition = sortedPartitions.stream()
 				.filter(part -> part.size() > 1)
 				.findFirst()
-				.orElseThrow();
+				.orElseThrow(RuntimeException::new);
 
 		for (BNode node : lowestNonTrivialPartition) {
 			List<BNode> fixpoints = new ArrayList<>(parentFixpoints);
@@ -146,7 +204,7 @@ public class GraphComparisons {
 		return lowestFound;
 	}
 
-	static Map<BNode, BNode> findCompatibleAutomorphism(List<BNode> fixpoints,
+	protected static Map<BNode, BNode> findCompatibleAutomorphism(List<BNode> fixpoints,
 			List<Map<BNode, HashCode>> partitionMappings) {
 		// check if two mappings with identical hash codes exist
 		for (Map<BNode, HashCode> mapping : partitionMappings) {
