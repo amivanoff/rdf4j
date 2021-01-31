@@ -167,17 +167,14 @@ class GraphComparisons {
 	protected static Set<BNode> getBlankNodes(Model m) {
 		final Set<BNode> blankNodes = new HashSet<>();
 
-		m.subjects().forEach(s -> {
-			if (s.isBNode()) {
-				blankNodes.add((BNode) s);
+		m.forEach(st -> {
+			if (st.getSubject().isBNode()) {
+				blankNodes.add((BNode) st.getSubject());
+			}
+			if (st.getObject().isBNode()) {
+				blankNodes.add((BNode) st.getObject());
 			}
 		});
-		m.objects().forEach(o -> {
-			if (o.isBNode()) {
-				blankNodes.add((BNode) o);
-			}
-		});
-
 		return blankNodes;
 	}
 
