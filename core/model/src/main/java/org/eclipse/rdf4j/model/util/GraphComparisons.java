@@ -96,7 +96,7 @@ class GraphComparisons {
 		if (model1.contexts().size() > 1) {
 			// model contains more than one context (including the null context). We compare per individual context.
 			for (Resource context : model1.contexts()) {
-				if (context instanceof BNode) {
+				if (context.isBNode()) {
 					// We currently do not handle mapping of blank nodes used as context identifiers.
 					logger.warn(
 							"isomorphism detection can not map blank nodes used as context identifiers. Comparison may give inaccurate results",
@@ -118,10 +118,34 @@ class GraphComparisons {
 			return true;
 		} else {
 			// only one context (the null context), so we're dealing with one graph only.
-			final Model c1 = isoCanonicalize(model1);
-			final Model c2 = isoCanonicalize(model2);
+			final Map<BNode, HashCode> mapping1 = hashBNodes(model1);
+			if (mapping1.isEmpty()) {
+				// no blank nodes in model1 - simple collection equality will do
+				return model1.equals(model2);
+			}
+			final Map<BNode, HashCode> mapping2 = hashBNodes(model2);
+			if (mappingsIncompatible(mapping1, mapping2)) {
+				return false;
+			}
+
+			final Model c1 = labelModel(model1, mapping1);
+			final Model c2 = labelModel(model2, mapping2);
 			return c1.equals(c2);
 		}
+	}
+
+	private static boolean mappingsIncompatible(Map<BNode, HashCode> mapping1, Map<BNode, HashCode> mapping2) {
+		if (mapping1.size() != mapping2.size()) {
+			return true;
+		}
+		Collection<HashCode> values1 = mapping1.values();
+		Collection<HashCode> values2 = mapping2.values();
+
+		if (!(values1.containsAll(values2) && values2.containsAll(values1))) {
+			return true;
+		}
+
+		return false;
 	}
 
 	protected static Model isoCanonicalize(Model m) {
@@ -139,12 +163,12 @@ class GraphComparisons {
 		final Set<BNode> blankNodes = new HashSet<>();
 
 		m.subjects().forEach(s -> {
-			if (s instanceof BNode) {
+			if (s.isBNode()) {
 				blankNodes.add((BNode) s);
 			}
 		});
 		m.objects().forEach(o -> {
-			if (o instanceof BNode) {
+			if (o.isBNode()) {
 				blankNodes.add((BNode) o);
 			}
 		});
@@ -268,12 +292,12 @@ class GraphComparisons {
 		Model result = new LinkedHashModel(original.size());
 
 		for (Statement st : original) {
-			if (st.getSubject() instanceof BNode || st.getObject() instanceof BNode) {
-				Resource subject = st.getSubject() instanceof BNode
+			if (st.getSubject().isBNode() || st.getObject().isBNode()) {
+				Resource subject = st.getSubject().isBNode()
 						? createCanonicalBNode((BNode) st.getSubject(), hash)
 						: st.getSubject();
 				IRI predicate = st.getPredicate();
-				Value object = st.getObject() instanceof BNode
+				Value object = st.getObject().isBNode()
 						? createCanonicalBNode((BNode) st.getObject(), hash)
 						: st.getObject();
 
@@ -337,7 +361,7 @@ class GraphComparisons {
 
 	private static HashCode hashForValue(Value value, Map<BNode, HashCode> bnodeMapping,
 			Map<Value, HashCode> staticValueMapping) {
-		if (value instanceof BNode) {
+		if (value.isBNode()) {
 			return bnodeMapping.get(value);
 		}
 		return staticValueMapping.computeIfAbsent(value,
