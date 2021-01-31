@@ -96,7 +96,7 @@ class GraphComparisons {
 		if (model1.contexts().size() > 1) {
 			// model contains more than one context (including the null context). We compare per individual context.
 			for (Resource context : model1.contexts()) {
-				if (context.isBNode()) {
+				if (context != null && context.isBNode()) {
 					// We currently do not handle mapping of blank nodes used as context identifiers.
 					logger.warn(
 							"isomorphism detection can not map blank nodes used as context identifiers. Comparison may give inaccurate results",
