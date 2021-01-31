@@ -8,6 +8,8 @@
 
 package org.eclipse.rdf4j.model.util;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -190,6 +192,20 @@ public class IsomorphicTest {
 
 		notIsomorphic(bsbm, bsbmChanged);
 
+	}
+
+	@Test(timeout = 2000)
+	public void testValidationReport_LexicalOrdering() throws IOException {
+		Model m1 = getModel("shaclValidationReport.ttl");
+		Model m2 = getModel("shaclValidationReport.ttl");
+
+		LexicalValueComparator lexicalValueComparator = new LexicalValueComparator();
+
+		m1 = m1.stream()
+				.sorted((a, b) -> lexicalValueComparator.compare(a.getObject(), b.getObject()))
+				.collect(ModelCollector.toModel());
+
+		assertThat(Models.isomorphic(m1, m2));
 	}
 
 	private static Model getModel(String name) {
