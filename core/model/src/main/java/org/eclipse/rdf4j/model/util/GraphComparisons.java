@@ -118,12 +118,12 @@ class GraphComparisons {
 			return true;
 		} else {
 			// only one context (the null context), so we're dealing with one graph only.
-			final Map<BNode, HashCode> mapping1 = hashBNodes(model1);
+			final Map<BNode, HashCode> mapping1 = getIsoCanonicalMapping(model1);
 			if (mapping1.isEmpty()) {
 				// no blank nodes in model1 - simple collection equality will do
 				return model1.equals(model2);
 			}
-			final Map<BNode, HashCode> mapping2 = hashBNodes(model2);
+			final Map<BNode, HashCode> mapping2 = getIsoCanonicalMapping(model2);
 			if (mappingsIncompatible(mapping1, mapping2)) {
 				return false;
 			}
@@ -149,14 +149,19 @@ class GraphComparisons {
 	}
 
 	protected static Model isoCanonicalize(Model m) {
+		return labelModel(m, getIsoCanonicalMapping(m));
+	}
+
+	protected static Map<BNode, HashCode> getIsoCanonicalMapping(Model m) {
 		Map<BNode, HashCode> blankNodeMapping = hashBNodes(m);
 		Multimap<HashCode, BNode> partition = partitionMapping(blankNodeMapping);
 
 		if (isFine(partition)) {
-			return labelModel(m, blankNodeMapping);
+			return blankNodeMapping;
 		}
 
 		return distinguish(m, blankNodeMapping, partition, null, new ArrayList<>(), new ArrayList<>());
+
 	}
 
 	protected static Set<BNode> getBlankNodes(Model m) {
@@ -176,9 +181,10 @@ class GraphComparisons {
 		return blankNodes;
 	}
 
-	private static Model distinguish(Model m, Map<BNode, HashCode> blankNodeMapping,
+	private static Map<BNode, HashCode> distinguish(Model m, Map<BNode, HashCode> blankNodeMapping,
 			Multimap<HashCode, BNode> partitionMapping,
-			Model lowestFound, List<BNode> parentFixpoints, List<Map<BNode, HashCode>> finePartitionMappings) {
+			Map<BNode, HashCode> lowestFound, List<BNode> parentFixpoints,
+			List<Map<BNode, HashCode>> finePartitionMappings) {
 
 		final List<Collection<BNode>> sortedPartitions = new ArrayList<>(partitionMapping.asMap().values());
 		Collections.sort(sortedPartitions, new Comparator<Collection<BNode>>() {
@@ -212,7 +218,7 @@ class GraphComparisons {
 			if (isFine(partitionPrime)) {
 				finePartitionMappings.add(hashDoublePrime);
 				if (lowestFound == null || mappingSize(hashDoublePrime).compareTo(mappingSize(blankNodeMapping)) < 0) {
-					lowestFound = labelModel(m, hashDoublePrime);
+					lowestFound = hashDoublePrime;
 				}
 			} else {
 				Map<BNode, BNode> compatibleAutomorphism = findCompatibleAutomorphism(fixpoints, finePartitionMappings);
